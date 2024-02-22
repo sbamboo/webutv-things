@@ -1,0 +1,16 @@
+header div ul{
+    display: flex;
+    li{
+        background-color: aqua;
+        list-style-type: none;
+        &:hover{
+                background-color:black;
+        }
+        div{
+            display:none;
+        }
+    }
+}
+.classVisible{
+    display:block;
+}
