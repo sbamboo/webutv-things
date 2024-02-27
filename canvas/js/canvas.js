@@ -1,16 +1,54 @@
 var canvas;
 var ctx;
 var circlex = 250;
+var circley = 350;
+var deltay = 0;
+var deltax = 0;
+var keylist = []
 
 window.onload = () => {
     canvas = document.getElementById("canvas");
     ctx = canvas.getContext("2d");
-
-    canvas.onmousemove = () => {
-        circlex++;
+    document.onkeydown = (e) => {
+        /*switch (e.code) {
+            case "KeyW":
+                deltay=-1;
+                break;
+            case "KeyS":
+                deltay=+1;
+                break;
+            case "KeyA":
+                deltax=-1;
+                break;
+            case "KeyD":
+                deltax=+1;
+                break;
+        }*/
+        if (!keylist.includes(e.code)) {
+            keylist.push(e.code)
+        }
     }
-
-    setInterval(render, 30);
+    document.onkeyup = (e) => {
+        /*switch (e.code) {
+            case "KeyW":
+                deltay=0;
+                break;
+            case "KeyS":
+                deltay=0;
+                break;
+            case "KeyA":
+                deltax=0;
+                break;
+            case "KeyD":
+                deltax=0;
+                break;
+        }*/
+        ind = keylist.indexOf(e.code)
+        if (keylist.includes(e.code)) {
+            keylist.splice(ind)
+        }
+    }
+    gameloop();
 }
 
 function render() {
@@ -26,6 +64,32 @@ function render() {
 
     ctx.fillStyle = "hotpink";
     ctx.beginPath();
-    ctx.arc(circlex, 350, 40, 0, Math.PI*2);
+    ctx.arc(circlex, circley, 40, 0, Math.PI*2);
     ctx.fill();
+}
+
+function gameloop() {
+    render();
+    flytta();
+    requestAnimationFrame(gameloop);
+}
+function flytta() {
+    deltay=0;
+    deltax=0;
+    keylist.forEach( key => {
+        switch (key) {
+            case "KeyW":
+                deltay += -1;
+                break;
+            case "KeyS":
+                deltay += 1;
+                break;
+            case "KeyA":
+                deltax += -1;
+                break;
+            case "KeyD":
+                deltax += 1;
+                break;
+        }
+    });
 }
