@@ -1,0 +1,16 @@
+body {
+    background-color: brown;
+    background-image: url("../images/ball-color-2681137_960_720.png");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+canvas {
+    border: black 1px solid
+}
+
+.centerer {
+    display: flex;
+    justify-content: center;
+}
