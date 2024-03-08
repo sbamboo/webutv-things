@@ -1,3 +1,4 @@
+//Todo: rem deltaTime, make lastFrameTime into timeElapsed, add fixedRate delta comparison
 var canvas;
 var ctx;
 
