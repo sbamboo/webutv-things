@@ -3,7 +3,7 @@ var ctx;
 
 // #region Defaults
 const player_baseSpeed = 0.5;
-const player_baseSprintSpeed = 1;
+const player_speedBoostFactor = 2;
 const player_baseRadius = 20;
 const player_baseX = 250;
 const player_baseY = 250;
@@ -14,6 +14,7 @@ const player_baseFrictX = 0.97;
 const player_baseFrictY = 0.97;
 const player_baseGrav = 0.1;
 const player_baseCollSub = 0.9;
+var player_lastSpeed = null;
 var player_hasFriction = true;
 var player_hasGravity = false;
 var player_hasCollSub = true;
@@ -43,6 +44,8 @@ var max_y = 500;
 var min_y = 0;
 
 var dead = false;
+var canDie = true;
+var isPaused = false;
 
 // #region debug
 // Function to draw text with diffrent colors on the same line
@@ -69,7 +72,9 @@ function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3) {
             var textWidth = ctx.measureText(val).width;
             ctx.fillRect(x, y - fontSize + 5, textWidth, fontSize); // Adjust y position for better appearance
         }
-
+        if (val == null) {
+            val = "null";
+        }
         val = val.toString();
         val = val.replace(".00","");
         ctx.fillStyle = segment[1];
@@ -80,12 +85,22 @@ function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3) {
 
 // Function to cast a value to a datatype dynamicly
 function castValue(value, dataType) {
+    switch(value.toLowerCase()) {
+        case 'true':
+            dataType = "bool";
+            value = true;
+        case 'false':
+            dataType = "bool";
+            value = false;
+    }
     switch(dataType) {
         case 'string':
             return String(value);
         case 'number':
             return Number(value);
         case 'boolean':
+            return Boolean(value);
+        case 'bool':
             return Boolean(value);
         default:
             return value;
@@ -235,6 +250,17 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
         else{
             this.y += this.dy;
         }
+
+        //Final clamp incase "fly-out"
+        if (this.y<min_y-radie) {
+            this.y = min_y;
+        } else if (this.y>max_y+radie) {
+            this.y = max_y;
+        } else if (this.x>max_x+radie) {
+            this.x = max_x;
+        } else if (this.x<min_x-radie) {
+            this.x = min_x;
+        }
     }
     // CollisionChecker method
     this.checkCollisionCirc = (circleObj) => {
@@ -285,9 +311,10 @@ window.onload = () => {
     canvas = document.getElementById("canvas");
     // If debug show debug-elems on page
     if (debug == true) {
+        wrapper = document.getElementById("canvasWrapper");
         div = document.createElement("div");
         div.id = "debug-elems";
-        document.body.appendChild(div);
+        wrapper.appendChild(div);
         input = document.createElement("input");
         input.id = "ovv-cmd";
         input.type = "text";
@@ -365,33 +392,42 @@ function render() {
 
     // If debug is enabled also show the debug-text
     if (debug == true) {
+        _txCol = "white";
+        _constCol = "#f05959";
+        _valCol = "#007acc";
+        _boolCol = "#a463d6";
+        _axiCol = "#6a8a35"
         drawText(
             ctx = ctx,
             segments = [
-                ["Gravity:","black"],
-                [player.grav,"red"],
-                [", Friction:","black"],
-                ["x","darkgreen"],
-                [player.frictX,"red"],
-                [",","black"],
-                ["y","darkgreen"],
-                [player.frictY,"red"],
-                [", CollisionSub:","black"],
-                [player.collSub,"red"],
-                [", PlayerPos:","black"],
-                [player.x,"blue",true],
-                ["x","black"],
-                [player.y,"blue",true],
-                [", PlayerDX:","black"],
-                [player.dx,"blue",true],
-                [", PlayerDY:","black"],
-                [player.dy,"blue",true],
-                [", PlayerSp:","black"],
-                [player.speed,"blue",true]
+                ["Gravity:",_txCol],
+                [player.grav,_constCol],
+                [", Friction:",_txCol],
+                ["x",_axiCol],
+                [player.frictX,_constCol],
+                [",",_txCol],
+                ["y",_axiCol],
+                [player.frictY,_constCol],
+                [", CollisionSub:",_txCol],
+                [player.collSub,_constCol],
+                [", PlayerPos:",_txCol],
+                [player.x,_valCol,true],
+                ["x",_txCol],
+                [player.y,_valCol,true],
+                [", PlayerDX:",_txCol],
+                [player.dx,_valCol,true],
+                [", PlayerDY:",_txCol],
+                [player.dy,_valCol,true],
+                [", PlayerSp:",_txCol],
+                [player.speed,_valCol,true],
+                [", PlayerLSp:",_txCol],
+                [player_lastSpeed,_valCol],
+                [", CanDie:",_txCol],
+                [canDie,_boolCol]
             ],
             x = 10,
-            y = 50,
-            fontSize = 28,
+            y = 20,
+            fontSize = 18,
             font = "Arial",
             roundTo = 2
         )
@@ -400,8 +436,27 @@ function render() {
 
 // Gameloop
 function gameloop() {
-    flytta();
+    // Apply pause if debug is enabled and P is given
+    if(debug == true && keylist.includes("KeyP")) {
+        if (!isPaused) {
+            console.log("DEBUG: Paused game!")
+            isPaused = true;
+        } else {
+            console.log("DEBUG: Unpaused game!")
+            isPaused = false;
+        }
+        var ind = keylist.indexOf("KeyP")
+        if (ind>-1) {
+            keylist.splice(ind, 1)
+        }
+    }
+    // Move
+    if (!isPaused) {
+        flytta();
+    }
+    // Render
     render();
+    // StateChecks
     theEndIfMet();
 }
 
@@ -410,7 +465,9 @@ function theEndIfMet() {
     circles.forEach(c => {
         if (!c.isPlayer) {
             if (c.checkCollisionCirc(player) == true) {
-                dead = true;
+                if (canDie) {
+                    dead = true;
+                }
             }
         }
     })
@@ -423,7 +480,7 @@ function theEndIfMet() {
                 ["You died!","red",false,"#333333"]
             ],
             x = Math.round(canvas.width / 3),
-            y = Math.round(canvas.width / 2),
+            y = Math.round(canvas.height / 2),
             fontSize = 38,
             font = "Arial",
             roundTo = 2
@@ -435,7 +492,15 @@ function theEndIfMet() {
 function flytta() {
     // Apply shift speed increse (TODO: fix that shit)
     if(keylist.includes("ShiftLeft")) {
-        player.speed = player_baseSprintSpeed;
+        if (player_lastSpeed == null) {
+            player_lastSpeed = player.speed;
+            player.speed *= player_speedBoostFactor;
+        }
+    } else {
+        if (player_lastSpeed != null) {
+            player.speed = player_lastSpeed;
+            player_lastSpeed = null;
+        }
     }
 
     // set player deltas based on key-input
