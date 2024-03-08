@@ -7,11 +7,16 @@ body {
 }
 
 canvas {
-    border: black 1px solid
+    border: black 1px solid;
 }
 
 .centerer {
     display: flex;
     justify-content: center;
+    flex-direction: row;
+}
+
+.vertFlex {
+    display: flex;
     flex-direction: column;
 }

@@ -2,8 +2,8 @@ var canvas;
 var ctx;
 
 // #region Defaults
-const player_baseSpeed = 0.5;
-const player_speedBoostFactor = 2;
+const player_baseSpeed = 0.3; //3.5
+const player_speedBoostFactor = 1.5;
 const player_baseRadius = 20;
 const player_baseX = 250;
 const player_baseY = 250;
@@ -19,7 +19,7 @@ var player_hasFriction = true;
 var player_hasGravity = false;
 var player_hasCollSub = true;
 
-const enemy_baseSpeed = 0.5;
+const enemy_baseSpeed = 0.2; //20
 const enemy_baseRadius = 20;
 const enemy_baseX = 250;
 const enemy_baseY = 250;
@@ -35,6 +35,13 @@ var enemy_hasGravity = false;
 var enemy_hasCollSub = false;
 // #endregion
 
+var player_image = null;
+_player_image = new Image();
+_player_image.src = "./images/favicon.png";
+_player_image.onload = () => {
+    player_image = _player_image;
+}
+
 var keylist = []
 var circles = []
 
@@ -43,9 +50,12 @@ var min_x = 0;
 var max_y = 500;
 var min_y = 0;
 
+const smalDeltaLim = 0.1;
+
 var dead = false;
 var canDie = true;
 var isPaused = false;
+var lastFrameTime = performance.now();
 
 // #region debug
 // Function to draw text with diffrent colors on the same line
@@ -168,7 +178,7 @@ var debug = new URLSearchParams(window.location.search).has("debug") // Grab boo
 // #endregion
 
 // Main circle object for player and enemies
-function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, color, isPlayer=false) {
+function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, image, color, isPlayer=false) {
     // Asign variables to object
     this.isPlayer = isPlayer
     this.x = x;
@@ -185,15 +195,30 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
     this.hasFrict = hasFrict;
     this.hasGrav = hasGrav;
     this.hasCollSub = hasCollSub
+    this.image = image
     // Draw method
     this.draw = (ctx) =>{
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x,this.y,radie,0, Math.PI*2);
-        ctx.fill();
+        if (this.image == null || this.image == undefined) {
+            // Draw color
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x,this.y,radie,0, Math.PI*2);
+            ctx.fill();
+        } else {
+            // Draw image
+            ctx.save();
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x,this.y,radie,0, Math.PI*2);
+            ctx.fill();
+            ctx.clip();
+            ctx.drawImage(this.image, this.x-this.radie, this.y-this.radie, this.radie*2, this.radie*2);
+            ctx.restore();
+        }
     }
     // Move method
-    this.move = ()=>{
+    this.move = (deltaTime=1)=>{
+
         // Apply gravity if enabled for object
         if (this.hasGrav == true) {
             this.dy += this.grav;
@@ -204,10 +229,10 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             this.dy *= this.frictY;
         }
         // SmalVal clamp the deltas
-        if (this.dx<0.1 && this.dx>-0.1) {
+        if (this.dx<smalDeltaLim && this.dx>-smalDeltaLim) {
             this.dx = 0;
         }
-        if (this.dy<0.1 && this.dy>-0.1) {
+        if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) {
             this.dy = 0;
         }
 
@@ -223,12 +248,13 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             // If collisionSubstract is enabled for object do that aswell as inverting the delta
             if (this.hasCollSub == true) {
                 this.dx *= -this.collSub;
+                if (this.dx<smalDeltaLim && this.dx>-smalDeltaLim) { this.dx = 0; }
             } else {
                 this.dx *= -1;
             }
         }
         else{
-            this.x += this.dx * this.speed;
+            this.x += this.dx * this.speed * deltaTime;
         }
     
         // Clamp y to inside canvas
@@ -243,12 +269,13 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             // If collisionSubstract is enabled for object do that aswell as inverting the delta
             if (this.hasCollSub == true) {
                 this.dy *= -this.collSub;
+                if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) { this.dy = 0; }
             } else {
                 this.dy *= -1;
             }
         }
         else{
-            this.y += this.dy;
+            this.y += this.dy * this.speed * deltaTime;
         }
 
         //Final clamp incase "fly-out"
@@ -275,7 +302,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
 }
 
 // Function to create an enemy with defaults values
-function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,colorOvv=null) {
+function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null) {
     if (radiusOvv == null) { rad = enemy_baseRadius; } else { rad = radiusOvv; }
     if (speedOvv == null) { speed = enemy_baseSpeed; } else { speed = speedOvv; }
     if (colorOvv == null) { color = enemy_baseColor; } else { color = colorOvv; }
@@ -300,6 +327,7 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
         hasFrict,
         hasGrav,
         hasCollSub,
+        image,
         color,
         isPlayer = false
     )
@@ -365,15 +393,16 @@ window.onload = () => {
         player_hasFriction,
         player_hasGravity,
         player_hasCollSub,
+        player_image,
         player_baseColor,
         isPlayer = true
     );
     circles.push(player);
 
     // Create enemies
-    circles.push( makeEnemy(50,25,  3, 4,  null,null,null,null,null,null,null,null,null,"darkgreen") );
-    circles.push( makeEnemy(68,123, 2, 6,  null,null,null,null,null,null,null,null,null,"red") );
-    circles.push( makeEnemy(-34,41, -2, 1, null,null,null,null,null,null,null,null,null,"goldenrod") );
+    circles.push( makeEnemy(50,25,  3, 4,  null,null,null,null,null,null,null,null,null,null,"darkgreen") );
+    circles.push( makeEnemy(68,123, 2, 6,  null,null,null,null,null,null,null,null,null,null,"red") );
+    circles.push( makeEnemy(-34,41, -2, 1, null,null,null,null,null,null,null,null,null,null,"goldenrod") );
 
     // Begin
     gameloop();
@@ -414,16 +443,19 @@ function render() {
                 [player.x,_valCol,true],
                 ["x",_txCol],
                 [player.y,_valCol,true],
-                [", PlayerDX:",_txCol],
-                [player.dx,_valCol,true],
-                [", PlayerDY:",_txCol],
-                [player.dy,_valCol,true],
                 [", PlayerSp:",_txCol],
                 [player.speed,_valCol,true],
                 [", PlayerLSp:",_txCol],
                 [player_lastSpeed,_valCol],
+                [", PlayerDX:",_txCol],
+                [player.dx,_valCol,true],
+                [", PlayerDY:",_txCol],
+                [player.dy,_valCol,true],
                 [", CanDie:",_txCol],
-                [canDie,_boolCol]
+                [canDie,_boolCol],
+                [", lft:",_txCol],
+                [lastFrameTime/1000,_valCol,true],
+                ["s",_valCol],
             ],
             x = 10,
             y = 20,
@@ -443,6 +475,7 @@ function gameloop() {
             isPaused = true;
         } else {
             console.log("DEBUG: Unpaused game!")
+            lastFrameTime = performance.now();
             isPaused = false;
         }
         var ind = keylist.indexOf("KeyP")
@@ -524,8 +557,14 @@ function flytta() {
         }
     });
 
+    // Get deltaTime
+    currentTime = performance.now();
+    const deltaTime = (currentTime - lastFrameTime) / 1000;
+    lastFrameTime = currentTime;
+
     // Call move method on al circles
     circles.forEach(c => {
+        //c.move(deltaTime);
         c.move();
     });
 }
