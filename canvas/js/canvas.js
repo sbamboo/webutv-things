@@ -1,4 +1,5 @@
-//Todo: rem deltaTime, make lastFrameTime into timeElapsed, add fixedRate delta comparison
+//Todo: Add fixedRate delta comparison
+
 var canvas;
 var ctx;
 
@@ -56,7 +57,7 @@ const smalDeltaLim = 0.1;
 var dead = false;
 var canDie = true;
 var isPaused = false;
-var lastFrameTime = performance.now();
+var timeElapsed = performance.now();
 
 // #region debug
 // Function to draw text with diffrent colors on the same line
@@ -218,7 +219,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
         }
     }
     // Move method
-    this.move = (deltaTime=1)=>{
+    this.move = (deltaFactor=1)=>{
 
         // Apply gravity if enabled for object
         if (this.hasGrav == true) {
@@ -255,7 +256,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             }
         }
         else{
-            this.x += this.dx * this.speed * deltaTime;
+            this.x += this.dx * this.speed * deltaFactor;
         }
     
         // Clamp y to inside canvas
@@ -276,7 +277,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             }
         }
         else{
-            this.y += this.dy * this.speed * deltaTime;
+            this.y += this.dy * this.speed * deltaFactor;
         }
 
         //Final clamp incase "fly-out"
@@ -454,8 +455,8 @@ function render() {
                 [player.dy,_valCol,true],
                 [", CanDie:",_txCol],
                 [canDie,_boolCol],
-                [", lft:",_txCol],
-                [lastFrameTime/1000,_valCol,true],
+                [", timeElaps:",_txCol],
+                [timeElapsed/1000,_valCol,true],
                 ["s",_valCol],
             ],
             x = 10,
@@ -476,7 +477,7 @@ function gameloop() {
             isPaused = true;
         } else {
             console.log("DEBUG: Unpaused game!")
-            lastFrameTime = performance.now();
+            timeElapsed = performance.now();
             isPaused = false;
         }
         var ind = keylist.indexOf("KeyP")
@@ -558,14 +559,15 @@ function flytta() {
         }
     });
 
-    // Get deltaTime
+    // Get deltaFactor
     currentTime = performance.now();
-    const deltaTime = (currentTime - lastFrameTime) / 1000;
-    lastFrameTime = currentTime;
+    const targetTimeMs = 10;
+    const deltaFactor = (timeElapsed+targetTimeMs / currentTime) / 1000;
+    timeElapsed = currentTime;
 
     // Call move method on al circles
     circles.forEach(c => {
-        //c.move(deltaTime);
+        //c.move(deltaFactor);
         c.move();
     });
 }
