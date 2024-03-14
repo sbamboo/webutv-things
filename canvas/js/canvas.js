@@ -7,17 +7,17 @@ var ctx;
 const player_baseSpeed = 0.6;
 const player_speedBoostFactor = 1.5;
 const player_baseRadius = 20;
-const player_baseShieldDistance = 7;
-const player_baseShieldWidthDeg = 90;
-const player_baseShieldThickness = 5;
+const player_baseShieldDistance = 8;
+const player_baseShieldWidthDeg = 110;
+const player_baseShieldThickness = 7;
 const player_baseX = 250;
 const player_baseY = 250;
 const player_baseColor = "hotpink";
 const player_baseShieldColor = "blue";
 const player_baseDX = 0;
 const player_baseDY = 0;
-const player_baseFrictX = 0.9;
-const player_baseFrictY = 0.9;
+const player_baseFrictX = 0.93;
+const player_baseFrictY = 0.93;
 const player_baseGrav = 0.1;
 const player_baseCollSub = 0.9;
 var player_lastSpeed = null;
@@ -30,8 +30,8 @@ const enemy_baseRadius = 20;
 const enemy_baseShieldDistance = 2;
 const enemy_baseShieldWidthDeg = 90;
 const enemy_baseShieldThickness = 5;
-const enemy_baseX = 250;
-const enemy_baseY = 250;
+const enemy_baseX = 400;
+const enemy_baseY = 400;
 const enemy_baseColor = "green";
 const enemy_baseShieldColor = "red";
 const enemy_baseDX = 10;
@@ -62,18 +62,39 @@ var min_y = 0;
 
 const smalDeltaLim = 0.1;
 
+var difficulty = 10;
+var enemySpawnCooldown = 5000;
+const enemyShieldSpawnFactorDivisor = 100; // factor=diff/100
+const enemySpawnCooldownFactorDivisor = 1; // time=time-(diff/1.5)
+
 var dead = false;
 var canDie = true;
 var isPaused = false;
 var lastState_shieldUp = null;
 var timeElapsed = performance.now();
+var score = 0;
 
 var mPosX = 0;
 var mPosY = 0;
 
+function clickable(triggerEvent,x1=0,y1=0,x2=0,y2=0) {
+    this.trigger = (event,canvas) => {
+        rect = canvas.getBoundingClientRect();
+        mouseX = event.clientX - rect.left;
+        mouseY = event.clientY - rect.top;
+        if (x1 < mouseX && mouseX < x2 && y1 < mouseY && mouseY < y2) {
+            triggerEvent()
+        }
+    }
+}
+var clickables = []
+var deathText = null;
+
 // #region debug
 // Function to draw text with diffrent colors on the same line
-function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3) {
+function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3, doReturnPos=false) {
+    ox = x;
+    oy = y;
     ctx.font = `${fontSize}px ${font}`
     segments.forEach( segment => {
         var val = segment[0]
@@ -105,6 +126,9 @@ function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3) {
         ctx.fillText(val, x, y);
         x += ctx.measureText(val).width;
     });
+    if (doReturnPos == true) {
+        return [ox,oy-fontSize+5,x,y]
+    }
 }
 
 // Function to cast a value to a datatype dynamicly
@@ -200,6 +224,7 @@ function updateMousePos(e) {
 // Main circle object for player and enemies
 function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, image, color, shieldColor, shieldDis, shieldWdeg, shieldThickness, isPlayer=false) {
     // Asign variables to object
+    this.id = null;
     this.isPlayer = isPlayer
     this.x = x;
     this.y = y;
@@ -341,30 +366,204 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
         xval = this.x - circleObj.x;
         yval = this.y - circleObj.y;
         dist = Math.sqrt( xval*xval + yval*yval ); // a^2+b^2=c^2
-        if (this.radie + circleObj.radie > dist) {
-            // Check for shield?
-            if (circleObj.isPlayer == true) {
-                if (circleObj.shieldUp == true) {
-                    angleRadians = Math.atan2(this.y-circleObj.y, this.x-circleObj.x);
-                    console.log(`\nsr1:${circleObj.shieldRad1*(180/Math.PI)}\n ar:${angleRadians*(180/Math.PI)}\n sr2:${circleObj.shieldRad2*(180/Math.PI)}`)
-                    if (circleObj.shieldRad1 > angleRadians < circleObj.shieldRad2) {
-                        return false;
-                    } else {
+        angleRadians = Math.atan2(this.y-circleObj.y, this.x-circleObj.x);
+        // Check types of collision checking
+        // Both ShieldUp
+        if (this.shieldUp == true && circleObj.shieldUp == true ) {
+            // Apply collision-check with offset for radius+shielddistance+shieldwidth for both objects
+            thisCombined = this.radie+this.shieldDis+this.shieldThickness
+            circCombined = circleObj.radie+circleObj.shieldDis+circleObj.shieldThickness
+            if (thisCombined + circCombined > dist) {
+                // To give a little playroom i compare rounded degrees instead of precise-radians.
+                thisUpper = Math.round(Math.max(this.shieldRad1,this.shieldRad2)*(180/Math.PI))
+                thisLower = Math.round(Math.min(this.shieldRad1,this.shieldRad2)*(180/Math.PI))
+                circUpper = Math.round(Math.max(circleObj.shieldRad1,circleObj.shieldRad2)*(180/Math.PI))
+                circLower = Math.round(Math.min(circleObj.shieldRad1,circleObj.shieldRad2)*(180/Math.PI))
+                value = Math.round(angleRadians*(180/Math.PI))
+                // Check collision from both perspectives respectively
+                coll_from_this_perspective = false;
+                coll_from_circ_perspective = false;
+                if (thisLower<=value && value<=thisUpper) {
+                    coll_from_this_perspective = true;
+                }
+                if (circLower<=value && value<=circUpper) {
+                    coll_from_circ_perspective = true;
+                }
+                // Collision within both shields
+                if (coll_from_this_perspective == true && coll_from_circ_perspective == true) {
+                    // This is player
+                    if (this.isPlayer == true && circleObj.isPlayer == false) {
+                        target = this;
+                    // CircleObj is player
+                    } else if (this.isPlayer == false && circleObj.isPlayer == true) {
+                        target = circleObj;
+                    }
+                    // Disable player shield
+                    target.shieldUp = false;
+                    // Invert target move
+                    target.dx *= -1;
+                    target.dy *= -1;
+                    // Delay death
+                    canDie = false;
+                    setTimeout(()=>{canDie=true},500);
+                    // No collision since action
+                    return false;
+                // Collision from only this perspective
+                } else if (coll_from_this_perspective == true && coll_from_circ_perspective == false) {
+                    // This is player
+                    if (this.isPlayer == true && circleObj.isPlayer == false) {
+                        // Kill enemy
+                        return "rem";
+                    // CircleObj is player
+                    } else if (this.isPlayer == false && circleObj.isPlayer == true) {
+                        // Collision
                         return true;
                     }
+                // Collision from only circ perspective
+                } else if (coll_from_this_perspective == false && coll_from_circ_perspective == true) {
+                    // This is player
+                    if (this.isPlayer == true && circleObj.isPlayer == false) {
+                        // Collision
+                        return true;
+                    // CircleObj is player
+                    } else if (this.isPlayer == false && circleObj.isPlayer == true) {
+                        // Kill enemy
+                        return "rem";
+                    }
+                // No collision within shield-width so re-calculate if we really are colliding?
                 } else {
-                    return true;
+                    if (this.radie + circleObj.radie > dist) {
+                        // Return we are colliding
+                        return true;
+                    } else {
+                        // Return we aren't colliding
+                        return false;
+                    }
                 }
-            } else {
+            }
+        // One ShieldUp (this)
+        } else if (this.shieldUp == true && circleObj.shieldUp == false) {
+            // Apply collision-check with offset for radius+shielddistance+shieldwidth for one object
+            thisCombined = this.radie+this.shieldDis+this.shieldThickness
+            if (thisCombined + circleObj.radie > dist) {
+                // To give a little playroom i compare rounded degrees instead of precise-radians.
+                upper = Math.round(Math.max(this.shieldRad1,this.shieldRad2)*(180/Math.PI))
+                lower = Math.round(Math.min(this.shieldRad1,this.shieldRad2)*(180/Math.PI))
+                value = Math.round(angleRadians*(180/Math.PI))
+                // Collision within shieldwith so handle it
+                if (lower <= value && value <= upper) {
+                    // This is player
+                    if (this.isPlayer == true && circleObj.isPlayer == false) {
+                        // Kill enemy
+                        return "rem";
+                    // CircleObj is player
+                    } else if (this.isPlayer == false && circleObj.isPlayer == true) {
+                        // Collision
+                        return true;
+                    }
+                // No collision within shield-width so re-calculate if we really are colliding?
+                } else {
+                    if (this.radie + circleObj.radie > dist) {
+                        // Return we are colliding
+                        return true;
+                    } else {
+                        // Return we aren't colliding
+                        return false;
+                    }
+                }
+            }
+        // One ShieldUp (circleObj)
+        } else if (this.shieldUp == false && circleObj.shieldUp == true) {
+            // Apply collision-check with offset for radius+shielddistance+shieldwidth for one object
+            circCombined = circleObj.radie+circleObj.shieldDis+circleObj.shieldThickness
+            if (this.radie + circCombined > dist) {
+                // To give a little playroom i compare rounded degrees instead of precise-radians.
+                upper = Math.round(Math.max(circleObj.shieldRad1,circleObj.shieldRad2)*(180/Math.PI))
+                lower = Math.round(Math.min(circleObj.shieldRad1,circleObj.shieldRad2)*(180/Math.PI))
+                value = Math.round(angleRadians*(180/Math.PI))
+                // Collision within shieldwith so handle it
+                if (lower <= value && value <= upper) {
+                    // This is player
+                    if (this.isPlayer == true && circleObj.isPlayer == false) {
+                        // Collision
+                        return true;
+                    // CircleObj is player
+                    } else if (this.isPlayer == false && circleObj.isPlayer == true) {
+                        // Kill enemy
+                        return "rem";
+                    }
+                // No collision within shield-width so re-calculate if we really are colliding?
+                } else {
+                    if (this.radie + circleObj.radie > dist) {
+                        // Return we are colliding
+                        return true;
+                    } else {
+                        // Return we aren't colliding
+                        return false;
+                    }
+                }
+            }
+        // No ShieldUp
+        } else {
+            // Apply collision-check without offset for both objects
+            if (this.radie + circleObj.radie > dist) {
+                // Return we are colliding
                 return true;
+            } else {
+                // Return we aren't colliding
+                return false;
             }
         }
-        return false;
     }
 }
 
+function pushWithId(array,objWithId) {
+    array.push(objWithId)
+    objWithId.id = array.length -1
+    return array
+}
+
+function getRandomColor() {
+    // Generate random values for red,green,blue (random:0-255)
+    const r = Math.floor(Math.random() * 256);
+    const g = Math.floor(Math.random() * 256);
+    const b = Math.floor(Math.random() * 256);
+    // Build the color string in hex
+    const color = '#' + r.toString(16).padStart(2,'0') + g.toString(16).padStart(2,'0') + b.toString(16).padStart(2,'0');
+    return color;
+}
+
+function getRandMinMax(min,max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-6,6],radiusInterval=[15,25],speedInterval=[0.2,0.5],playerX=null,playerY=null,playerRad=null,fixNum=null,calcOffset=null) {
+    offX = getRandMinMax(posInterval[0],posInterval[1]);
+    offY = getRandMinMax(posInterval[0],posInterval[1]);
+    offDx = getRandMinMax(deltaInterval[0],deltaInterval[1]);
+    offDy = getRandMinMax(deltaInterval[0],deltaInterval[1]);
+    radius = getRandMinMax(radiusInterval[0],radiusInterval[1]);
+    speed = getRandMinMax(speedInterval[0],speedInterval[1]);
+    color = getRandomColor();
+    if (playerX != null && playerY != null && playerRad != null && fixNum != null && calcOffset != null) {
+        x = enemy_baseX+offX;
+        y = enemy_baseY+offY;
+        distX = x-playerX
+        distY = y-playerY
+        dist = Math.sqrt(distX*distX + distY*distY)
+        if (dist < playerRad+radius) {
+            offX += fixNum;
+            offY += fixNum;
+        }
+    }
+    shieldChance = difficulty/enemyShieldSpawnFactorDivisor;
+    hasShield = Math.random() < shieldChance;
+    console.log(shieldChance);
+    return makeEnemy(offX,offY, offDx,offDy,  radius,speed,null,null,null,null,null,null,null,null,color,null,null,null,null,hasShield)
+}
+
 // Function to create an enemy with defaults values
-function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null,shieldColorOvv=null,shieldDisOvv=null,shieldWdegOvv=null,shieldThicknessOvv=null) {
+function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null,shieldColorOvv=null,shieldDisOvv=null,shieldWdegOvv=null,shieldThicknessOvv=null, shieldEnabled=false) {
     if (radiusOvv == null) { rad = enemy_baseRadius; } else { rad = radiusOvv; }
     if (speedOvv == null) { speed = enemy_baseSpeed; } else { speed = speedOvv; }
     if (colorOvv == null) { color = enemy_baseColor; } else { color = colorOvv; }
@@ -379,7 +578,7 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
     if (shieldDisOvv == null) { shieldDis = enemy_baseShieldDistance } else { shieldDis = shieldDisOvv }
     if (shieldWdegOvv == null) { shieldWdeg = enemy_baseShieldWidthDeg } else { shieldWdeg = shieldWdegOvv }
     if (shieldThicknessOvv == null) { shieldThickness = enemy_baseShieldThickness } else { shieldThickness = shieldThicknessOvv }
-    return new circle(
+    _t = new circle(
         enemy_baseX+offsetX,
         enemy_baseY+offsetY,
         enemy_baseDX+offsetDX,
@@ -401,11 +600,33 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
         shieldThickness,
         isPlayer = false
     )
+    _t.shieldUp = shieldEnabled
+    return _t
 }
+
+function spawnEnemy() {
+    enemySpawnCooldown -= difficulty/enemySpawnCooldownFactorDivisor;
+    pushWithId(circles, makeRandomEnemy([-200,700],[-6,6],[15,25],[0.2,0.5],player.x,player.y,player.radie,player.radie*2,5))
+    setTimeout( spawnEnemy, enemySpawnCooldown )
+}
+
 
 // Main setup code
 window.onmousemove = updateMousePos
+window.onclick = (event) => {
+    if (canvas != null && canvas != undefined) {
+        clickables.forEach(clickableObj => {
+            clickableObj.trigger(event,canvas)
+        });
+    }
+}
 window.onload = () => {
+    document.addEventListener('keydown', function(event) {
+        if (event.altKey) {
+            event.preventDefault();
+        }
+    });
+
     // Grab canvas
     canvas = document.getElementById("canvas");
 
@@ -472,12 +693,13 @@ window.onload = () => {
         player_baseShieldThickness,
         isPlayer = true
     );
-    circles.push(player);
+    pushWithId(circles,player);
 
     // Create enemies
-    circles.push( makeEnemy(50,25,  3, 4,  null,null,null,null,null,null,null,null,null,null,"darkgreen",null,null,null,null) );
-    circles.push( makeEnemy(68,123, 2, 6,  null,null,null,null,null,null,null,null,null,null,"red",null,null,null,null) );
-    circles.push( makeEnemy(-34,41, -2, 1, null,null,null,null,null,null,null,null,null,null,"goldenrod",null,null,null,null) );
+    setTimeout(
+        spawnEnemy,
+        0
+    )
 
     // Begin
     gameloop();
@@ -506,49 +728,84 @@ function render() {
     _font = "Arial";
     _roundTo = 2;
     if (debug == true) {
-        _segments =[
-            ["Gravity:",_txCol],
-            [player.grav,_constCol],
-            [", Friction:",_txCol],
-            ["x",_axiCol],
-            [player.frictX,_constCol],
-            [",",_txCol],
-            ["y",_axiCol],
-            [player.frictY,_constCol],
-            [", CollisionSub:",_txCol],
-            [player.collSub,_constCol],
-            [", PlayerPos:",_txCol],
-            [player.x,_valCol,true],
-            ["x",_txCol],
-            [player.y,_valCol,true],
-            [", PlayerSp:",_txCol],
-            [player.speed,_valCol,true],
-            [", PlayerLSp:",_txCol],
-            [player_lastSpeed,_valCol],
-            [", PlayerDX:",_txCol],
-            [player.dx,_valCol,true],
-            [", PlayerDY:",_txCol],
-            [player.dy,_valCol,true],
-            [", CanDie:",_txCol],
-            [canDie,_boolCol],
-            [", Shield:",_txCol],
-            [player.shieldUp,_boolCol],
-            [", timeElaps:",_txCol],
-            [timeElapsed/1000,_valCol,true],
-            ["s",_valCol],
-            [", Mouse:",_txCol],
-            ["x",_axiCol],
-            [mPosX,_valCol],
-            ["y",_axiCol],
-            [mPosY,_valCol]
-        ]
+        drawText(
+            ctx=ctx,
+            segments = [
+                ["Gravity:",_txCol],
+                [player.grav,_constCol],
+                [", Friction:",_txCol],
+                ["x",_axiCol],
+                [player.frictX,_constCol],
+                [",",_txCol],
+                ["y",_axiCol],
+                [player.frictY,_constCol],
+                [", CollisionSub:",_txCol],
+                [player.collSub,_constCol],
+                [", PlayerPos:",_txCol],
+                [player.x,_valCol,true],
+                ["x",_txCol],
+                [player.y,_valCol,true],
+                [", PlayerSp:",_txCol],
+                [player.speed,_valCol,true],
+                [", PlayerLSp:",_txCol],
+                [player_lastSpeed,_valCol],
+                [", PlayerDX:",_txCol],
+                [player.dx,_valCol,true],
+                [", PlayerDY:",_txCol],
+                [player.dy,_valCol,true],
+                [", CanDie:",_txCol],
+                [canDie,_boolCol],
+                [", Shield:",_txCol],
+                [player.shieldUp,_boolCol]
+            ],
+            x=_tX,
+            y=_tY,
+            fontSize=_fontSize,
+            font=_font
+            ,roundTo=_roundTo
+        )
+        drawText(
+            ctx=ctx,
+            segments = [
+                ["timeElaps:",_txCol],
+                [timeElapsed/1000,_valCol,true],
+                ["s",_valCol],
+                [", Mouse:",_txCol],
+                ["x",_axiCol],
+                [mPosX,_valCol],
+                ["y",_axiCol],
+                [mPosY,_valCol],
+                [", Score:",_txCol],
+                [score,_valCol],
+                [", Diff: ",_txCol],
+                [difficulty/10,_valCol],
+                [", Ecd: ",_txCol],
+                [enemySpawnCooldown,_valCol]
+            ],
+            x=_tX,
+            y=_tY+_fontSize+10,
+            fontSize=_fontSize,
+            font=_font
+            ,roundTo=_roundTo
+        )
     } else {
-        _segments = [
-            ["TimeElapsed: ",_txCol],
-            [timeElapsed/1000,_valCol,true]
-        ]
+        drawText(
+            ctx=ctx,
+            segments = [
+                ["TimeElapsed: ",_txCol],
+                [timeElapsed/1000,_valCol,true],
+                [", Score: ",_txCol],
+                [score,_valCol],
+                [", Difficulty: ",_txCol],
+                [difficulty/10,_valCol]
+            ],
+            x=_tX,
+            y=_tY,
+            fontSize=_fontSize,
+            font=_font
+            ,roundTo=_roundTo
+        )
     }
-    drawText( ctx=ctx, segments=_segments, x=_tX, y=_tY, fontSize=_fontSize, font=_font ,roundTo=_roundTo)
 }
 
 // Gameloop
@@ -584,15 +841,24 @@ function gameloop() {
 
 // GameStates
 function theEndIfMet() {
+    currentKilled = [];
     circles.forEach(c => {
-        if (!c.isPlayer) {
-            if (c.checkCollisionCirc(player) == true) {
-                if (canDie) {
-                    dead = true;
+        if (!currentKilled.includes(c)) {
+            if (!c.isPlayer) {
+                coll = c.checkCollisionCirc(player);
+                if (coll == "rem") {
+                    score += 1;
+                    difficulty += 1;
+                    currentKilled.push(c);
+                } else if (coll == true) {
+                    if (canDie) {
+                        dead = true;
+                    }
                 }
             }
         }
     })
+    circles = circles.filter(element => !currentKilled.includes(element));
     if (!dead) {
         requestAnimationFrame(gameloop);
     } else {
@@ -601,12 +867,36 @@ function theEndIfMet() {
             segments = [
                 ["You died!","red",false,"#333333"]
             ],
-            x = Math.round(canvas.width / 3),
-            y = Math.round(canvas.height / 2),
+            x = Math.round(canvas.width / 2.5),
+            y = Math.round(canvas.height / 4),
             fontSize = 38,
             font = "Arial",
             roundTo = 2
         )
+        positions = drawText(
+            ctx = ctx,
+            segments = [
+                ["Restart","black",false,"gray"]
+            ],
+            x = Math.round(canvas.width / 2.5)+17,
+            y = Math.round(canvas.height / 4)+50,
+            fontSize = 38,
+            font = "Arial",
+            roundTo = 2,
+            doReturnPos=true
+        )
+        if (!clickables.includes(deathText)) {
+            deathText = new clickable(
+                triggerEvent = ()=> {
+                    window.location.reload()
+                },
+                x1=positions[0],
+                y1=positions[1],
+                x2=positions[2],
+                y2=positions[3]
+            )
+            clickables.push(deathText)
+        }
     }
 }
 
@@ -630,7 +920,7 @@ function flytta() {
     }
 
     // Toggle shield
-    if (keylist.includes("KeyH")) {
+    if (keylist.includes("AltLeft")) {
         if (lastState_shieldUp == null) {
             lastState_shieldUp = true;
             player.shieldUp = true;
