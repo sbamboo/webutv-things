@@ -4,16 +4,20 @@ var canvas;
 var ctx;
 
 // #region Defaults
-const player_baseSpeed = 0.3; //3.5
+const player_baseSpeed = 0.6;
 const player_speedBoostFactor = 1.5;
 const player_baseRadius = 20;
+const player_baseShieldDistance = 7;
+const player_baseShieldWidthDeg = 90;
+const player_baseShieldThickness = 5;
 const player_baseX = 250;
 const player_baseY = 250;
 const player_baseColor = "hotpink";
+const player_baseShieldColor = "blue";
 const player_baseDX = 0;
 const player_baseDY = 0;
-const player_baseFrictX = 0.97;
-const player_baseFrictY = 0.97;
+const player_baseFrictX = 0.9;
+const player_baseFrictY = 0.9;
 const player_baseGrav = 0.1;
 const player_baseCollSub = 0.9;
 var player_lastSpeed = null;
@@ -21,11 +25,15 @@ var player_hasFriction = true;
 var player_hasGravity = false;
 var player_hasCollSub = true;
 
-const enemy_baseSpeed = 0.2; //20
+const enemy_baseSpeed = 0.2;
 const enemy_baseRadius = 20;
+const enemy_baseShieldDistance = 2;
+const enemy_baseShieldWidthDeg = 90;
+const enemy_baseShieldThickness = 5;
 const enemy_baseX = 250;
 const enemy_baseY = 250;
 const enemy_baseColor = "green";
+const enemy_baseShieldColor = "red";
 const enemy_baseDX = 10;
 const enemy_baseDY = 10;
 const enemy_baseFrictX = 0.97;
@@ -57,7 +65,11 @@ const smalDeltaLim = 0.1;
 var dead = false;
 var canDie = true;
 var isPaused = false;
+var lastState_shieldUp = null;
 var timeElapsed = performance.now();
+
+var mPosX = 0;
+var mPosY = 0;
 
 // #region debug
 // Function to draw text with diffrent colors on the same line
@@ -179,8 +191,14 @@ function chnGlob() {
 var debug = new URLSearchParams(window.location.search).has("debug") // Grab bool for debug mode
 // #endregion
 
+function updateMousePos(e) {
+    // Update mouse pos    
+    mPosX = e.clientX;
+    mPosY = e.clientY;
+}
+
 // Main circle object for player and enemies
-function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, image, color, isPlayer=false) {
+function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, image, color, shieldColor, shieldDis, shieldWdeg, shieldThickness, isPlayer=false) {
     // Asign variables to object
     this.isPlayer = isPlayer
     this.x = x;
@@ -189,6 +207,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
     this.dy = dy;
     this.radie = radie;
     this.color = color;
+    this.shieldColor = shieldColor;
     this.speed = speed;
     this.frictX = frictX;
     this.frictY = frictY;
@@ -196,27 +215,53 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
     this.collSub = collSub;
     this.hasFrict = hasFrict;
     this.hasGrav = hasGrav;
-    this.hasCollSub = hasCollSub
-    this.image = image
+    this.hasCollSub = hasCollSub;
+    this.image = image;
+    this.shieldUp = false;
+    this.shieldDis = shieldDis;
+    this.shieldWrad = shieldWdeg*(Math.PI/180)
+    this.shieldThickness = shieldThickness
+    this.setShieldWidth = (degrees) => {
+        this.shieldWrad = degrees*(Math.PI/180)
+    }
+    this.shieldRad1 = 0;
+    this.shieldRad2 = Math.PI;
     // Draw method
     this.draw = (ctx) =>{
+        // Draw shield
+        if (!isPaused && this.shieldUp == true) {
+            // Draw
+            ctx.strokeStyle = this.shieldColor;
+            ctx.lineWidth = this.shieldThickness;
+            ctx.beginPath();
+            ctx.arc(this.x,this.y,this.radie+this.shieldDis, this.shieldRad1, this.shieldRad2);
+            ctx.stroke();
+        }
         if (this.image == null || this.image == undefined) {
             // Draw color
             ctx.fillStyle = this.color;
             ctx.beginPath();
-            ctx.arc(this.x,this.y,radie,0, Math.PI*2);
+            ctx.arc(this.x,this.y,this.radie, 0,Math.PI*2);
             ctx.fill();
         } else {
             // Draw image
             ctx.save();
             ctx.fillStyle = this.color;
             ctx.beginPath();
-            ctx.arc(this.x,this.y,radie,0, Math.PI*2);
+            ctx.arc(this.x,this.y,this.radie, 0,Math.PI*2);
             ctx.fill();
             ctx.clip();
             ctx.drawImage(this.image, this.x-this.radie, this.y-this.radie, this.radie*2, this.radie*2);
             ctx.restore();
         }
+    }
+    // Update method
+    this.update = () => {
+        // Calc angle to mouse
+        angleRadians = Math.atan2(mPosY-this.y, mPosX-this.x);
+        // Get radians for resulting shield
+        this.shieldRad1 = angleRadians-(this.shieldWrad/2);
+        this.shieldRad2 = angleRadians+(this.shieldWrad/2);
     }
     // Move method
     this.move = (deltaFactor=1)=>{
@@ -297,17 +342,33 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
         yval = this.y - circleObj.y;
         dist = Math.sqrt( xval*xval + yval*yval ); // a^2+b^2=c^2
         if (this.radie + circleObj.radie > dist) {
-            return true;
+            // Check for shield?
+            if (circleObj.isPlayer == true) {
+                if (circleObj.shieldUp == true) {
+                    angleRadians = Math.atan2(this.y-circleObj.y, this.x-circleObj.x);
+                    console.log(`\nsr1:${circleObj.shieldRad1*(180/Math.PI)}\n ar:${angleRadians*(180/Math.PI)}\n sr2:${circleObj.shieldRad2*(180/Math.PI)}`)
+                    if (circleObj.shieldRad1 > angleRadians < circleObj.shieldRad2) {
+                        return false;
+                    } else {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
+            } else {
+                return true;
+            }
         }
         return false;
     }
 }
 
 // Function to create an enemy with defaults values
-function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null) {
+function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null,shieldColorOvv=null,shieldDisOvv=null,shieldWdegOvv=null,shieldThicknessOvv=null) {
     if (radiusOvv == null) { rad = enemy_baseRadius; } else { rad = radiusOvv; }
     if (speedOvv == null) { speed = enemy_baseSpeed; } else { speed = speedOvv; }
     if (colorOvv == null) { color = enemy_baseColor; } else { color = colorOvv; }
+    if (shieldColorOvv == null) { shieldColor = enemy_baseShieldColor; } else { color = shieldColorOvv; }
     if (frictXOvv == null) { frictX = enemy_baseFrictX; } else { frictX = frictXOvv; }
     if (frictYOvv == null) { frictY = enemy_baseFrictY; } else { frictY = frictYOvv; }
     if (gravOvv == null) { grav = enemy_baseGrav; } else { grav = gravOvv; }
@@ -315,6 +376,9 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
     if (hasFrictOvv == null) { hasFrict = enemy_hasFriction; } else { hasFrict = hasFrictOvv; }
     if (hasGravOvv == null) { hasGrav = enemy_hasGravity; } else { hasGrav = hasGravOvv; }
     if (hasCollSub == null) { hasCollSub = enemy_hasCollSub; } else { hasCollSub = hasCollSub; }
+    if (shieldDisOvv == null) { shieldDis = enemy_baseShieldDistance } else { shieldDis = shieldDisOvv }
+    if (shieldWdegOvv == null) { shieldWdeg = enemy_baseShieldWidthDeg } else { shieldWdeg = shieldWdegOvv }
+    if (shieldThicknessOvv == null) { shieldThickness = enemy_baseShieldThickness } else { shieldThickness = shieldThicknessOvv }
     return new circle(
         enemy_baseX+offsetX,
         enemy_baseY+offsetY,
@@ -331,14 +395,20 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
         hasCollSub,
         image,
         color,
+        shieldColor,
+        shieldDis,
+        shieldWdeg,
+        shieldThickness,
         isPlayer = false
     )
 }
 
 // Main setup code
+window.onmousemove = updateMousePos
 window.onload = () => {
     // Grab canvas
     canvas = document.getElementById("canvas");
+
     // If debug show debug-elems on page
     if (debug == true) {
         wrapper = document.getElementById("canvasWrapper");
@@ -356,12 +426,11 @@ window.onload = () => {
         button.innerHTML = "Run";
         div.appendChild(input);
         div.appendChild(button);
-        canvas.width = 1670;
-        canvas.height = 850;
     }
     // Grab min/max incase diffrent from default (if debug changed it)
     max_x = canvas.width;
     max_y = canvas.height;
+
     // Grab context
     ctx = canvas.getContext("2d");
 
@@ -397,14 +466,18 @@ window.onload = () => {
         player_hasCollSub,
         player_image,
         player_baseColor,
+        player_baseShieldColor,
+        player_baseShieldDistance,
+        player_baseShieldWidthDeg,
+        player_baseShieldThickness,
         isPlayer = true
     );
     circles.push(player);
 
     // Create enemies
-    circles.push( makeEnemy(50,25,  3, 4,  null,null,null,null,null,null,null,null,null,null,"darkgreen") );
-    circles.push( makeEnemy(68,123, 2, 6,  null,null,null,null,null,null,null,null,null,null,"red") );
-    circles.push( makeEnemy(-34,41, -2, 1, null,null,null,null,null,null,null,null,null,null,"goldenrod") );
+    circles.push( makeEnemy(50,25,  3, 4,  null,null,null,null,null,null,null,null,null,null,"darkgreen",null,null,null,null) );
+    circles.push( makeEnemy(68,123, 2, 6,  null,null,null,null,null,null,null,null,null,null,"red",null,null,null,null) );
+    circles.push( makeEnemy(-34,41, -2, 1, null,null,null,null,null,null,null,null,null,null,"goldenrod",null,null,null,null) );
 
     // Begin
     gameloop();
@@ -422,50 +495,60 @@ function render() {
     });
 
     // If debug is enabled also show the debug-text
+    _txCol = "white";
+    _constCol = "#f05959";
+    _valCol = "#007acc";
+    _boolCol = "#a463d6";
+    _axiCol = "#6a8a35";
+    _tX = 10;
+    _tY = 20;
+    _fontSize = 18;
+    _font = "Arial";
+    _roundTo = 2;
     if (debug == true) {
-        _txCol = "white";
-        _constCol = "#f05959";
-        _valCol = "#007acc";
-        _boolCol = "#a463d6";
-        _axiCol = "#6a8a35"
-        drawText(
-            ctx = ctx,
-            segments = [
-                ["Gravity:",_txCol],
-                [player.grav,_constCol],
-                [", Friction:",_txCol],
-                ["x",_axiCol],
-                [player.frictX,_constCol],
-                [",",_txCol],
-                ["y",_axiCol],
-                [player.frictY,_constCol],
-                [", CollisionSub:",_txCol],
-                [player.collSub,_constCol],
-                [", PlayerPos:",_txCol],
-                [player.x,_valCol,true],
-                ["x",_txCol],
-                [player.y,_valCol,true],
-                [", PlayerSp:",_txCol],
-                [player.speed,_valCol,true],
-                [", PlayerLSp:",_txCol],
-                [player_lastSpeed,_valCol],
-                [", PlayerDX:",_txCol],
-                [player.dx,_valCol,true],
-                [", PlayerDY:",_txCol],
-                [player.dy,_valCol,true],
-                [", CanDie:",_txCol],
-                [canDie,_boolCol],
-                [", timeElaps:",_txCol],
-                [timeElapsed/1000,_valCol,true],
-                ["s",_valCol],
-            ],
-            x = 10,
-            y = 20,
-            fontSize = 18,
-            font = "Arial",
-            roundTo = 2
-        )
+        _segments =[
+            ["Gravity:",_txCol],
+            [player.grav,_constCol],
+            [", Friction:",_txCol],
+            ["x",_axiCol],
+            [player.frictX,_constCol],
+            [",",_txCol],
+            ["y",_axiCol],
+            [player.frictY,_constCol],
+            [", CollisionSub:",_txCol],
+            [player.collSub,_constCol],
+            [", PlayerPos:",_txCol],
+            [player.x,_valCol,true],
+            ["x",_txCol],
+            [player.y,_valCol,true],
+            [", PlayerSp:",_txCol],
+            [player.speed,_valCol,true],
+            [", PlayerLSp:",_txCol],
+            [player_lastSpeed,_valCol],
+            [", PlayerDX:",_txCol],
+            [player.dx,_valCol,true],
+            [", PlayerDY:",_txCol],
+            [player.dy,_valCol,true],
+            [", CanDie:",_txCol],
+            [canDie,_boolCol],
+            [", Shield:",_txCol],
+            [player.shieldUp,_boolCol],
+            [", timeElaps:",_txCol],
+            [timeElapsed/1000,_valCol,true],
+            ["s",_valCol],
+            [", Mouse:",_txCol],
+            ["x",_axiCol],
+            [mPosX,_valCol],
+            ["y",_axiCol],
+            [mPosY,_valCol]
+        ]
+    } else {
+        _segments = [
+            ["TimeElapsed: ",_txCol],
+            [timeElapsed/1000,_valCol,true]
+        ]
     }
+    drawText( ctx=ctx, segments=_segments, x=_tX, y=_tY, fontSize=_fontSize, font=_font ,roundTo=_roundTo)
 }
 
 // Gameloop
@@ -489,6 +572,10 @@ function gameloop() {
     if (!isPaused) {
         flytta();
     }
+    // Update
+    circles.forEach(c => {
+        c.update();
+    });
     // Render
     render();
     // StateChecks
@@ -526,7 +613,7 @@ function theEndIfMet() {
 // Main mover function (posUpdate)
 function flytta() {
     // Apply shift speed increse (TODO: fix that shit)
-    if(keylist.includes("ShiftLeft")) {
+    if (keylist.includes("ShiftLeft")) {
         if (player_lastSpeed == null) {
             player_lastSpeed = player.speed;
             player.speed *= player_speedBoostFactor;
@@ -535,6 +622,23 @@ function flytta() {
         if (player_lastSpeed != null) {
             player.speed = player_lastSpeed;
             player_lastSpeed = null;
+        }
+    }
+    // Fix incase above logic buggs (failsafe)
+    if (player.speed == null) {
+        player.speed = player_baseSpeed;
+    }
+
+    // Toggle shield
+    if (keylist.includes("KeyH")) {
+        if (lastState_shieldUp == null) {
+            lastState_shieldUp = true;
+            player.shieldUp = true;
+        }
+    } else {
+        if (lastState_shieldUp != null) {
+            lastState_shieldUp = null;
+            player.shieldUp = false;
         }
     }
 
