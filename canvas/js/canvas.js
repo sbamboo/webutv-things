@@ -71,6 +71,7 @@ var dead = false;
 var canDie = true;
 var isPaused = false;
 var lastState_shieldUp = null;
+var lastState_canDie = null;
 var timeElapsed = performance.now();
 var score = 0;
 
@@ -404,8 +405,9 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
                     target.dx *= -1;
                     target.dy *= -1;
                     // Delay death
+                    lastState_canDie = canDie;
                     canDie = false;
-                    setTimeout(()=>{canDie=true},500);
+                    setTimeout(()=>{canDie=lastState_canDie; lastState_canDie=null;},500);
                     // No collision since action
                     return false;
                 // Collision from only this perspective
