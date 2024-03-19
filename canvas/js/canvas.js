@@ -4,8 +4,8 @@ var canvas;
 var ctx;
 
 // #region Defaults
-const player_baseSpeed = 0.6;
-const player_speedBoostFactor = 1.5;
+const player_baseSpeed = 20;
+const player_speedBoostFactor = 1.7;
 const player_baseRadius = 20;
 const player_baseShieldDistance = 8;
 const player_baseShieldWidthDeg = 110;
@@ -25,7 +25,7 @@ var player_hasFriction = true;
 var player_hasGravity = false;
 var player_hasCollSub = true;
 
-const enemy_baseSpeed = 0.2;
+const enemy_baseSpeed = 20;
 const enemy_baseRadius = 20;
 const enemy_baseShieldDistance = 2;
 const enemy_baseShieldWidthDeg = 90;
@@ -72,7 +72,8 @@ var canDie = true;
 var isPaused = false;
 var lastState_shieldUp = null;
 var lastState_canDie = null;
-var timeElapsed = performance.now();
+var timeElapsed = Date.now();
+const startTime = Date.now();
 var score = 0;
 
 var mPosX = 0;
@@ -88,8 +89,31 @@ function clickable(triggerEvent,x1=0,y1=0,x2=0,y2=0) {
         }
     }
 }
-var clickables = []
+var clickables = [];
 var deathText = null;
+function timeEvent(triggerEvent,timestamp,delayMS,identifier=null) {
+    this.identifier = identifier;
+    this.timestamp = timestamp;
+    this.delayMS = delayMS;
+    this.tleft = () => {
+        return (this.timestamp+this.delayMS - Date.now());
+    }
+    this.test = () => {
+        if (this.tleft() < 0) {
+            if (!remTimeEvents.includes(this)) {
+                triggerEvent();
+                remTimeEvents.push(this);
+            }
+        }
+    };
+}
+function registerTimeEvent(triggerEvent,delayMS,identifier=null) {
+    timeEvents.push(
+        new timeEvent(triggerEvent,Date.now(),delayMS,identifier)
+    )
+}
+var timeEvents = [];
+var remTimeEvents = [];
 
 // #region debug
 // Function to draw text with diffrent colors on the same line
@@ -122,7 +146,7 @@ function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3, doR
             val = "null";
         }
         val = val.toString();
-        val = val.replace(".00","");
+        //val = val.replace(".00","");
         ctx.fillStyle = segment[1];
         ctx.fillText(val, x, y);
         x += ctx.measureText(val).width;
@@ -301,12 +325,13 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             this.dx *= this.frictX;
             this.dy *= this.frictY;
         }
+
+        // Apply deltatime
+        this.dx *= deltaFactor;
+
         // SmalVal clamp the deltas
         if (this.dx<smalDeltaLim && this.dx>-smalDeltaLim) {
             this.dx = 0;
-        }
-        if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) {
-            this.dy = 0;
         }
 
         // Clamp x to inside canvas
@@ -327,7 +352,15 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             }
         }
         else{
-            this.x += this.dx * this.speed * deltaFactor;
+            this.x += this.dx * this.speed;
+        }
+        
+        // Apply deltatime
+        this.dy *= deltaFactor;
+
+        // SmalVal clamp the deltas
+        if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) {
+            this.dy = 0;
         }
     
         // Clamp y to inside canvas
@@ -348,18 +381,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             }
         }
         else{
-            this.y += this.dy * this.speed * deltaFactor;
-        }
-
-        //Final clamp incase "fly-out"
-        if (this.y<min_y-radie) {
-            this.y = min_y;
-        } else if (this.y>max_y+radie) {
-            this.y = max_y;
-        } else if (this.x>max_x+radie) {
-            this.x = max_x;
-        } else if (this.x<min_x-radie) {
-            this.x = min_x;
+            this.y += this.dy * this.speed;
         }
     }
     // CollisionChecker method
@@ -407,7 +429,11 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
                     // Delay death
                     lastState_canDie = canDie;
                     canDie = false;
-                    setTimeout(()=>{canDie=lastState_canDie; lastState_canDie=null;},500);
+                    registerTimeEvent(
+                        ()=>{canDie=lastState_canDie; lastState_canDie=null;},
+                        500,
+                        "noCanDie"
+                    );
                     // No collision since action
                     return false;
                 // Collision from only this perspective
@@ -539,7 +565,7 @@ function getRandMinMax(min,max) {
     return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-6,6],radiusInterval=[15,25],speedInterval=[0.2,0.5],playerX=null,playerY=null,playerRad=null,fixNum=null,calcOffset=null) {
+function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-6,6],radiusInterval=[15,25],speedInterval=[2,5],playerX=null,playerY=null,playerRad=null,fixNum=null,calcOffset=null) {
     offX = getRandMinMax(posInterval[0],posInterval[1]);
     offY = getRandMinMax(posInterval[0],posInterval[1]);
     offDx = getRandMinMax(deltaInterval[0],deltaInterval[1]);
@@ -608,8 +634,13 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
 
 function spawnEnemy() {
     enemySpawnCooldown -= difficulty/enemySpawnCooldownFactorDivisor;
-    pushWithId(circles, makeRandomEnemy([-200,700],[-6,6],[15,25],[0.2,0.5],player.x,player.y,player.radie,player.radie*2,5))
-    setTimeout( spawnEnemy, enemySpawnCooldown )
+    pushWithId(circles, makeRandomEnemy([-200,700],[-6,6],[15,25],[2,5],player.x,player.y,player.radie,player.radie*2,5))
+    console.log(enemySpawnCooldown);
+    registerTimeEvent(
+        ()=>{ spawnEnemy() },
+        enemySpawnCooldown,
+        "spEnem"
+    )
 }
 
 
@@ -698,9 +729,10 @@ window.onload = () => {
     pushWithId(circles,player);
 
     // Create enemies
-    setTimeout(
-        spawnEnemy,
-        0
+    registerTimeEvent(
+        ()=>{ spawnEnemy() },
+        0,
+        "stSpEnem"
     )
 
     // Begin
@@ -724,6 +756,8 @@ function render() {
     _valCol = "#007acc";
     _boolCol = "#a463d6";
     _axiCol = "#6a8a35";
+    _timeEventIdentiferCol = "blue";
+    _timeEventTleftCol = "red";
     _tX = 10;
     _tY = 20;
     _fontSize = 18;
@@ -766,24 +800,38 @@ function render() {
             font=_font
             ,roundTo=_roundTo
         )
+        _segments = [
+            ["timeElaps:",_txCol],
+            [(timeElapsed-startTime)/1000,_valCol,true],
+            ["s",_valCol],
+            [", Mouse:",_txCol],
+            ["x",_axiCol],
+            [mPosX,_valCol],
+            ["y",_axiCol],
+            [mPosY,_valCol],
+            [", Score:",_txCol],
+            [score,_valCol],
+            [", Diff: ",_txCol],
+            [difficulty/10,_valCol],
+            [", Ecd: ",_txCol],
+            [enemySpawnCooldown,_valCol],
+            [", TimeEvents: [",_txCol],
+        ];
+        timeEvents.forEach( timeEvent => {
+            if (timeEvent.identifier != null) {
+                _segments.push([`${timeEvent.identifier}:`,_timeEventIdentiferCol])
+                _segments.push([":",_txCol])
+            }
+            _segments.push([timeEvent.tleft()/1000,_timeEventTleftCol,true]);
+            _segments.push(["s",_txCol])
+            if (timeEvents.length > 1) {
+                _segments.push([", ",_txCol]);
+            }
+        });
+        _segments.push(["]",_txCol])
         drawText(
             ctx=ctx,
-            segments = [
-                ["timeElaps:",_txCol],
-                [timeElapsed/1000,_valCol,true],
-                ["s",_valCol],
-                [", Mouse:",_txCol],
-                ["x",_axiCol],
-                [mPosX,_valCol],
-                ["y",_axiCol],
-                [mPosY,_valCol],
-                [", Score:",_txCol],
-                [score,_valCol],
-                [", Diff: ",_txCol],
-                [difficulty/10,_valCol],
-                [", Ecd: ",_txCol],
-                [enemySpawnCooldown,_valCol]
-            ],
+            segments = _segments,
             x=_tX,
             y=_tY+_fontSize+10,
             fontSize=_fontSize,
@@ -795,7 +843,7 @@ function render() {
             ctx=ctx,
             segments = [
                 ["TimeElapsed: ",_txCol],
-                [timeElapsed/1000,_valCol,true],
+                [(timeElapsed-startTime)/1000,_valCol,true],
                 [", Score: ",_txCol],
                 [score,_valCol],
                 [", Difficulty: ",_txCol],
@@ -819,7 +867,7 @@ function gameloop() {
             isPaused = true;
         } else {
             console.log("DEBUG: Unpaused game!")
-            timeElapsed = performance.now();
+            timeElapsed = Date.now();
             isPaused = false;
         }
         var ind = keylist.indexOf("KeyP")
@@ -839,6 +887,16 @@ function gameloop() {
     render();
     // StateChecks
     theEndIfMet();
+    // Test time events
+    timeEvents.forEach(timeEvent => {
+        timeEvent.test();
+    });
+    remTimeEvents.forEach(timeEvent => {
+        ind = timeEvents.indexOf(timeEvent);
+        if (ind > -1) {
+          timeEvents.splice(ind,1);
+        }
+    })
 }
 
 // GameStates
@@ -956,14 +1014,12 @@ function flytta() {
     });
 
     // Get deltaFactor
-    currentTime = performance.now();
-    const targetTimeMs = 10;
-    const deltaFactor = (timeElapsed+targetTimeMs / currentTime) / 1000;
+    currentTime = Date.now();
+    const deltaFactor = (currentTime-timeElapsed) / 1000;
     timeElapsed = currentTime;
 
     // Call move method on al circles
     circles.forEach(c => {
-        //c.move(deltaFactor);
-        c.move();
+        c.move(deltaFactor);
     });
 }
