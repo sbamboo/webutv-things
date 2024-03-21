@@ -20,3 +20,36 @@ canvas {
     display: flex;
     flex-direction: column;
 }
+
+#sidepanel {
+    margin: 15px;
+    margin-right: 7px;
+    width: 12vw;
+}
+
+.sidepanel-board {
+    background-color: #1c1c1c;
+    border-radius: 15px;
+    height: fit-content;
+    padding: 10px;
+    color: #f3f3f3;
+    border: 1px solid #000000;
+    margin-bottom: 20px;
+}
+
+.sidepanel-board b {
+    color: white;
+    font-size: 18px;
+}
+
+#sidepanel-banner {
+    display: block;
+}
+#sidepanel-banner img {
+    max-height: 40px;
+}
+#sidepanel-banner i {
+    font-size: 12px;
+    text-align: center;
+    width: 100%;
+}
