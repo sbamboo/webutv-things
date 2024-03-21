@@ -1,11 +1,13 @@
-//Todo: Add fixedRate delta comparison
+//Todo: Fix wall-bounce when deltaTime is used
 
+// Define some core globals
 var canvas;
 var ctx;
 
 // #region Defaults
-const player_baseSpeed = 20;
-const player_speedBoostFactor = 1.7;
+// Defines default values for player and enemy, theese can be changed later inside the class but theese can be used as baseline
+const player_baseSpeed = 0.5;
+const player_speedBoostFactor = 2;
 const player_baseRadius = 20;
 const player_baseShieldDistance = 8;
 const player_baseShieldWidthDeg = 110;
@@ -24,8 +26,7 @@ var player_lastSpeed = null;
 var player_hasFriction = true;
 var player_hasGravity = false;
 var player_hasCollSub = true;
-
-const enemy_baseSpeed = 20;
+// Same for enemy
 const enemy_baseRadius = 20;
 const enemy_baseShieldDistance = 2;
 const enemy_baseShieldWidthDeg = 90;
@@ -34,8 +35,8 @@ const enemy_baseX = 400;
 const enemy_baseY = 400;
 const enemy_baseColor = "green";
 const enemy_baseShieldColor = "red";
-const enemy_baseDX = 10;
-const enemy_baseDY = 10;
+const enemy_baseDX = 2.8;
+const enemy_baseDY = 2.8;
 const enemy_baseFrictX = 0.97;
 const enemy_baseFrictY = 0.97;
 const enemy_baseGrav = 0.1;
@@ -45,13 +46,16 @@ var enemy_hasGravity = false;
 var enemy_hasCollSub = false;
 // #endregion
 
+// Define the image for the player
 var player_image = null;
 _player_image = new Image();
 _player_image.src = "./images/favicon.png";
+// Ensure the variable is only set after load-in
 _player_image.onload = () => {
     player_image = _player_image;
 }
 
+// Define some other global values
 var keylist = []
 var circles = []
 
@@ -60,25 +64,35 @@ var min_x = 0;
 var max_y = 500;
 var min_y = 0;
 
-const smalDeltaLim = 0.1;
-
-var difficulty = 10;
-var enemySpawnCooldown = 5000;
-const enemyShieldSpawnFactorDivisor = 100; // factor=diff/100
-const enemySpawnCooldownFactorDivisor = 1; // time=time-(diff/1.5)
-
-var dead = false;
-var canDie = true;
-var isPaused = false;
-var lastState_shieldUp = null;
-var lastState_canDie = null;
-var timeElapsed = Date.now();
-const startTime = Date.now();
 var score = 0;
 
 var mPosX = 0;
 var mPosY = 0;
 
+var avgDeltaTime = 0.016;
+
+const smalDeltaLim = 0.1; // A limit for how smal deltas can be before being clamped to 0
+
+// Difficulty variables:
+var difficulty = 10; // Difficulty start-value (note the displayed rounded value by 10 so intDiff10=shownDiff=1)
+var enemySpawnCooldown = 5000; // The ms-cooldown inbeetween enemy-spawn
+const enemyShieldSpawnFactorDivisor = 100; // factor=diff/<divisor>
+const enemySpawnCooldownFactorDivisor = 1; // time=time-(diff/<divisor>)
+
+// Define som boolean states
+var dead = false;
+var canDie = true;
+var isPaused = false;
+
+// Define some last-state holders
+var lastState_shieldUp = null;
+var lastState_canDie = null;
+
+// Define some variables for the time-system.
+var timeElapsed = Date.now();
+const startTime = Date.now();
+
+// Define a instanceable-function for clickable events.
 function clickable(triggerEvent,x1=0,y1=0,x2=0,y2=0) {
     this.trigger = (event,canvas) => {
         rect = canvas.getBoundingClientRect();
@@ -89,15 +103,21 @@ function clickable(triggerEvent,x1=0,y1=0,x2=0,y2=0) {
         }
     }
 }
+// Define a list that can be filled with clickables
 var clickables = [];
+// Define objects for clickables
 var deathText = null;
+
+// Define a instancable-function for timeEvents
 function timeEvent(triggerEvent,timestamp,delayMS,identifier=null) {
     this.identifier = identifier;
     this.timestamp = timestamp;
     this.delayMS = delayMS;
+    // Method for returning the time left until the event should be triggered
     this.tleft = () => {
         return (this.timestamp+this.delayMS - Date.now());
     }
+    // Method for testing if the event-should be triggered and if so trigger it
     this.test = () => {
         if (this.tleft() < 0) {
             if (!remTimeEvents.includes(this)) {
@@ -107,24 +127,30 @@ function timeEvent(triggerEvent,timestamp,delayMS,identifier=null) {
         }
     };
 }
+
+// Function to register timeEvents without having so specify the date-now,
 function registerTimeEvent(triggerEvent,delayMS,identifier=null) {
     timeEvents.push(
         new timeEvent(triggerEvent,Date.now(),delayMS,identifier)
     )
 }
+// Lists that time-events can be stored.
 var timeEvents = [];
-var remTimeEvents = [];
+var remTimeEvents = []; // to-remove list
 
 // #region debug
-// Function to draw text with diffrent colors on the same line
+// Function to draw text with diffrent colors on the same line, with features for background-color, value rounding etc.
 function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3, doReturnPos=false) {
     ox = x;
     oy = y;
     ctx.font = `${fontSize}px ${font}`
+    // Iterate over the segments, handle the values then add it to the screen.
     segments.forEach( segment => {
         var val = segment[0]
         bgColor = false;
         bgColor_color = "white";
+        // Segments are array of multiple values so check how many where passed.
+        // [<text>,<color>,<optional:roundValues>,<optional:backgroundColor>]
         if (3 >= 0 && 3 < segment.length) {
             bgColor = true;
             bgColor_color = segment[3]
@@ -142,15 +168,17 @@ function drawText(ctx, segments, x, y, fontSize=30, font="Arial", roundTo=3, doR
             var textWidth = ctx.measureText(val).width;
             ctx.fillRect(x, y - fontSize + 5, textWidth, fontSize); // Adjust y position for better appearance
         }
+        // Safe for no value to still be displayed
         if (val == null) {
             val = "null";
         }
+        // Draw the text and offset x by its-length.
         val = val.toString();
-        //val = val.replace(".00","");
         ctx.fillStyle = segment[1];
         ctx.fillText(val, x, y);
         x += ctx.measureText(val).width;
     });
+    // Return the positions if needed, usefull if you want to get the bbox of the text.
     if (doReturnPos == true) {
         return [ox,oy-fontSize+5,x,y]
     }
@@ -182,28 +210,38 @@ function castValue(value, dataType) {
 
 // Function for the debugger to change a variables value (either global or object-property)
 function chnGlob() {
+    // Get value from the input-element and split by;
     value = document.getElementById("ovv-cmd").value;
     parts = value.split(";");
+    // Foreach part execute it
     parts.forEach(value2 => {
+        // Get the varName, varValue and varType
         p = value2.split("=");
         cmd = p[0];
         val = p[1];
-        dt = "number";
+        dt = "number"; // preset
+        // Check if dataType was given
         if (val.includes(":")) {
             p2 = val.split(":");
             val = p2[0];
             dt = p2[1];
         }
+        // Use castvalue to the datatype
         val = castValue(val, dt);
+        // Check it we are wanting an object-property.
         if (cmd.includes(".")) {
+            // If it was get the parts
             p3 = cmd.split(".");
             host = p3[0];
             property = p3[1];
+            // Check if % is included which defines an index (say object is a list and we wan't to apply to al children.)
             if (host.includes("%")) {
                 p4 = host.split("%");
                 host = p4[0];
+                // * means al indexes
                 if (p4[1] == "*") {
                     ind = 0;
+                    // Iterate over al children and set the value
                     window[host].forEach( o => {
                         if (window[host][ind]) {
                             window[host][ind][property] = val;
@@ -213,6 +251,7 @@ function chnGlob() {
                         }
                         ind += 1;
                     });
+                // No * so specific index, so set the value for the specific index
                 } else {
                     ind = parseInt(p4[1]);
                     if (window[host][ind]) {
@@ -222,6 +261,7 @@ function chnGlob() {
                         console.log(`Failed set of ${property} with value ${val} on ${host} at index ${ind}, object dosen't exist!`);
                     }
                 }
+            // No index requested so just set value for property of object
             } else {
                 if (window[host]) {
                     window[host][property] = val;
@@ -230,6 +270,7 @@ function chnGlob() {
                     console.log(`Failed set of ${property} with value ${val} on ${host}, object dosen't exist!`);
                 }
             }
+        // if not just set the variable as a global
         } else {
             window[cmd] = val;
             console.log(`Attempted set of ${cmd} with value ${val} on window/global.`);
@@ -240,6 +281,7 @@ function chnGlob() {
 var debug = new URLSearchParams(window.location.search).has("debug") // Grab bool for debug mode
 // #endregion
 
+// Function to get the mouse-postion
 function updateMousePos(e) {
     // Update mouse pos    
     mPosX = e.clientX;
@@ -248,7 +290,7 @@ function updateMousePos(e) {
 
 // Main circle object for player and enemies
 function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGrav,hasCollSub, image, color, shieldColor, shieldDis, shieldWdeg, shieldThickness, isPlayer=false) {
-    // Asign variables to object
+    // Asign variables to object this.<prop>=<val>
     this.id = null;
     this.isPlayer = isPlayer
     this.x = x;
@@ -276,7 +318,7 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
     }
     this.shieldRad1 = 0;
     this.shieldRad2 = Math.PI;
-    // Draw method
+    // Draw method for circle
     this.draw = (ctx) =>{
         // Draw shield
         if (!isPaused && this.shieldUp == true) {
@@ -326,62 +368,61 @@ function circle(x,y,dx,dy,radie,speed,frictX,frictY,grav,collSub,hasFrict,hasGra
             this.dy *= this.frictY;
         }
 
-        // Apply deltatime
-        this.dx *= deltaFactor;
+        // Calculate values needed for wall-coll-check
+        deltaAppliedDX = this.dx * deltaFactor;
+        deltaAppliedDY = this.dy * deltaFactor;
+        futureXleft  = this.x - this.radie + deltaAppliedDX;
+        futureXright = this.x + this.radie + deltaAppliedDX;
+        futureYlower = this.y + this.radie + deltaAppliedDY;
+        futureYupper = this.y - this.radie + deltaAppliedDY;
+        safeRight = max_x - this.radie-1;
+        safeLeft  = min_x + this.radie+1;
+        safeLower = max_y - this.radie-1;
+        safeUpper = min_y + this.radie+1;
 
+        // Check for wall-collision for X
+        if (futureXleft < min_x || futureXright > max_x) {
+            /*if (futureXleft < min_x) {
+                this.x = safeLeft + (futureXleft * -1);
+            } else {
+                this.x = safeRight - (max_x - futureXright);
+            }*/
+            this.x = futureXleft < min_x ? safeLeft + (futureXleft * -1) : safeRight - (max_x-futureXright);
+
+            if (this.hasCollSub == true) {
+                this.dx *= -this.collSub;
+            } else {
+                this.dx *= -1;
+            }
+        } else {
+            this.x += deltaAppliedDX;
+        }
+
+        // Check for wall-collision for Y
+        if (futureYupper < min_y || futureYlower > max_y) {
+            /*if (futureYupper < min_y) {
+                this.y = safeUpper + (futureYupper * -1);
+            } else {
+                this.y = safeLower - (max_y - futureYlower);
+            }*/
+            this.y = futureYupper < min_y ? safeUpper + (futureYupper * -1) : safeLower - (max_y - futureYlower);
+
+            if (this.hasCollSub == true) {
+                this.dy *= -this.collSub;
+            } else {
+                this.dy *= -1;
+            }
+        } else {
+            this.y += deltaAppliedDY;
+        }
+
+        
         // SmalVal clamp the deltas
         if (this.dx<smalDeltaLim && this.dx>-smalDeltaLim) {
             this.dx = 0;
         }
-
-        // Clamp x to inside canvas
-        tempXleft = this.x + this.dx - this.radie;
-        tempXright = this.x + this.dx + this.radie;
-
-        safeRight = max_x - this.radie - 1;
-        safeLeft = min_x + this.radie + 1;
-
-        if(tempXleft<min_x || tempXright>max_x){
-            this.x = tempXleft<min_x?safeLeft+tempXleft*-1:safeRight-(max_x-tempXright);
-            // If collisionSubstract is enabled for object do that aswell as inverting the delta
-            if (this.hasCollSub == true) {
-                this.dx *= -this.collSub;
-                if (this.dx<smalDeltaLim && this.dx>-smalDeltaLim) { this.dx = 0; }
-            } else {
-                this.dx *= -1;
-            }
-        }
-        else{
-            this.x += this.dx * this.speed;
-        }
-        
-        // Apply deltatime
-        this.dy *= deltaFactor;
-
-        // SmalVal clamp the deltas
         if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) {
             this.dy = 0;
-        }
-    
-        // Clamp y to inside canvas
-        tempYlow = this.y + this.dy + radie;
-        tempYupp = this.y + this.dy - radie;
-
-        safeLower = max_y - radie - 1;
-        safeUpper = min_y + radie + 1;
-
-        if(tempYupp<min_y || tempYlow>max_y){
-            this.y = tempYupp<min_y?safeUpper+tempYupp*-1:safeLower-(max_y-tempYlow);
-            // If collisionSubstract is enabled for object do that aswell as inverting the delta
-            if (this.hasCollSub == true) {
-                this.dy *= -this.collSub;
-                if (this.dy<smalDeltaLim && this.dy>-smalDeltaLim) { this.dy = 0; }
-            } else {
-                this.dy *= -1;
-            }
-        }
-        else{
-            this.y += this.dy * this.speed;
         }
     }
     // CollisionChecker method
@@ -565,13 +606,12 @@ function getRandMinMax(min,max) {
     return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-6,6],radiusInterval=[15,25],speedInterval=[2,5],playerX=null,playerY=null,playerRad=null,fixNum=null,calcOffset=null) {
+function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-0.3,0.3],radiusInterval=[15,25],playerX=null,playerY=null,playerRad=null,fixNum=null,calcOffset=null) {
     offX = getRandMinMax(posInterval[0],posInterval[1]);
     offY = getRandMinMax(posInterval[0],posInterval[1]);
     offDx = getRandMinMax(deltaInterval[0],deltaInterval[1]);
     offDy = getRandMinMax(deltaInterval[0],deltaInterval[1]);
     radius = getRandMinMax(radiusInterval[0],radiusInterval[1]);
-    speed = getRandMinMax(speedInterval[0],speedInterval[1]);
     color = getRandomColor();
     if (playerX != null && playerY != null && playerRad != null && fixNum != null && calcOffset != null) {
         x = enemy_baseX+offX;
@@ -586,14 +626,12 @@ function makeRandomEnemy(posInterval=[-200,700],deltaInterval=[-6,6],radiusInter
     }
     shieldChance = difficulty/enemyShieldSpawnFactorDivisor;
     hasShield = Math.random() < shieldChance;
-    console.log(shieldChance);
-    return makeEnemy(offX,offY, offDx,offDy,  radius,speed,null,null,null,null,null,null,null,null,color,null,null,null,null,hasShield)
+    return makeEnemy(offX,offY, offDx,offDy,  radius,null,null,null,null,null,null,null,null,color,null,null,null,null,hasShield)
 }
 
 // Function to create an enemy with defaults values
-function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,speedOvv=null,image=null,colorOvv=null,shieldColorOvv=null,shieldDisOvv=null,shieldWdegOvv=null,shieldThicknessOvv=null, shieldEnabled=false) {
+function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,frictYOvv=null,gravOvv=null,collSubOvv=null,hasFrictOvv=null,hasGravOvv=null,hasCollSub=null,radiusOvv=null,image=null,colorOvv=null,shieldColorOvv=null,shieldDisOvv=null,shieldWdegOvv=null,shieldThicknessOvv=null, shieldEnabled=false) {
     if (radiusOvv == null) { rad = enemy_baseRadius; } else { rad = radiusOvv; }
-    if (speedOvv == null) { speed = enemy_baseSpeed; } else { speed = speedOvv; }
     if (colorOvv == null) { color = enemy_baseColor; } else { color = colorOvv; }
     if (shieldColorOvv == null) { shieldColor = enemy_baseShieldColor; } else { color = shieldColorOvv; }
     if (frictXOvv == null) { frictX = enemy_baseFrictX; } else { frictX = frictXOvv; }
@@ -609,10 +647,10 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
     _t = new circle(
         enemy_baseX+offsetX,
         enemy_baseY+offsetY,
-        enemy_baseDX+offsetDX,
-        enemy_baseDY+offsetDY,
+        (enemy_baseDX+offsetDX)/avgDeltaTime,
+        (enemy_baseDY+offsetDY)/avgDeltaTime,
         rad,
-        speed,
+        null,
         frictX,
         frictY,
         grav,
@@ -634,8 +672,7 @@ function makeEnemy(offsetX=0, offsetY=0, offsetDX=0, offsetDY=0, frictXOvv=null,
 
 function spawnEnemy() {
     enemySpawnCooldown -= difficulty/enemySpawnCooldownFactorDivisor;
-    pushWithId(circles, makeRandomEnemy([-200,700],[-6,6],[15,25],[2,5],player.x,player.y,player.radie,player.radie*2,5))
-    console.log(enemySpawnCooldown);
+    pushWithId(circles, makeRandomEnemy([-200,700],[-0.3,0.3],[15,25],player.x,player.y,player.radie,player.radie*2,5))
     registerTimeEvent(
         ()=>{ spawnEnemy() },
         enemySpawnCooldown,
@@ -710,7 +747,7 @@ window.onload = () => {
         player_baseDX,
         player_baseDY,
         player_baseRadius,
-        player_baseSpeed,
+        player_baseSpeed/avgDeltaTime,
         player_baseFrictX,
         player_baseFrictY,
         player_baseGrav,
