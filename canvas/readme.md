@@ -1,1 +1,1 @@
-!(A whole lot a balls banner)[https://raw.githubusercontent.com/sbamboo/webutv-things/main/canvas/images/banner.png "A whole lot a balls banner!"]
+![A whole lot a balls banner](https://raw.githubusercontent.com/sbamboo/webutv-things/main/canvas/images/banner.png "A whole lot a balls banner!")
